@@ -4,9 +4,13 @@ import (
 	"encoding/csv"
 	"ethereum_code/trie"
 	"fmt"
+	"github.com/DmitriyVTitov/size"
 	"github.com/syndtr/goleveldb/leveldb"
+	"math/rand"
 	"os"
+	"reflect"
 	"strconv"
+	"time"
 )
 
 type achivenode struct {
@@ -20,6 +24,33 @@ type consensusnode struct {
 	CacheTrie   *trie.Trie
 	CurrentTrie *trie.Trie
 	db          *leveldb.DB
+}
+
+func deleteTarget(s [][]byte, target []byte) [][]byte {
+	for i := 0; i < len(s); i++ {
+		if reflect.DeepEqual(s[i], target) {
+			s = append(s[:i], s[i+2:]...)
+			i--
+		}
+	}
+	return s
+}
+
+func deleteDuplicates(s []trie.Bag) []trie.Bag {
+	unique := make([]trie.Bag, 0, len(s))
+	for _, v := range s {
+		found := false
+		for _, u := range unique {
+			if reflect.DeepEqual(u, v) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unique = append(unique, v)
+		}
+	}
+	return unique
 }
 
 func main() {
@@ -67,6 +98,9 @@ func main() {
 
 	//blockHead := make([]trie.Header, 3)
 	//
+
+	var cache [][][]byte
+
 	for i := 1; i < 2; i++ {
 		filename := "./tx" + strconv.Itoa(i) + ".csv"
 		file, err := os.Open(filename)
@@ -82,17 +116,66 @@ func main() {
 		for x, tx := range csvdata {
 			a.GlobalTrie.Update([]byte(tx[0]), []byte(tx[1]))
 			a.CurrentTrie.Update([]byte(tx[0]), []byte(tx[1]))
+			c.CurrentTrie.Update([]byte(tx[0]), []byte(tx[1]))
+
+			cache = append(cache, [][]byte{[]byte(tx[0]), []byte(tx[1])})
 			if x%999 == 0 {
 				a.GlobalTrie.Commit(nil)
 				a.CacheTrie.Commit(nil)
 				a.CurrentTrie.Commit(nil)
+				c.CurrentTrie.Commit(nil)
+				c.CacheTrie.Commit(nil)
 			}
-			if (x+1)%40000 == 0 {
+			t := 100000
+			temp := make([][]byte, 10000)
+			if (x+1)%t == 0 {
 
-				achiveTrieSize, _ = a.db.GetProperty("leveldb.size")
-				f.WriteString(achiveTrieSize)
+				bag := make([]trie.Bag, 10000)
+				for i := 0; i < 10000; i++ {
+					rand.Seed(time.Now().Unix())
+					random := rand.Intn(t)
+					temp[i] = []byte(csvdata[x-random][0])
+					bag[i] = a.GlobalTrie.Getproof([]byte(csvdata[x-random][0]))
+
+				}
+				//bag = deleteDuplicates(bag) //去重
+
+				f.WriteString(strconv.Itoa(size.Of(bag)) + "\t")
+
+				//achiveTrieSize, _ = a.db.GetProperty("leveldb.size")
+
 				a.CacheTrie = a.CurrentTrie
 				a.CurrentTrie, _ = trie.NewTrie(trie.HexToHash(root1), a.db)
+
+				//共识节点冻结
+				index := (x + 1) / t
+				//consensusTrieSize, _ = c.db.GetProperty("leveldb.size")
+				for i := 0; i < len(bag); i++ {
+					for _, proof := range bag[i].Proof {
+						bool, _ := c.db.Has(proof, nil)
+						if bool {
+							bag[i].Proof = deleteTarget(bag[i].Proof, proof)
+						}
+					}
+				}
+				f2.WriteString(strconv.Itoa(size.Of(bag)) + "\t")
+
+				//
+				c.db.Close()
+
+				c.db, err = leveldb.OpenFile("database"+strconv.Itoa(index), nil)
+				if err != nil {
+					panic(err)
+				}
+
+				c.CurrentTrie, _ = trie.NewTrie(trie.HexToHash(root1), c.db)
+
+				c.CacheTrie, _ = trie.NewTrie(trie.HexToHash(root1), c.db)
+
+				for _, t := range cache {
+					c.CacheTrie.Update(t[0], t[1])
+				}
+				cache = [][][]byte{}
 			}
 		}
 		//stateroot, _ := a.GlobalTrie.Commit(nil)
@@ -115,15 +198,18 @@ func main() {
 	//	for x, tx := range csvdata {
 	//		c.CurrentTrie.Update([]byte(tx[0]), []byte(tx[1]))
 	//
-	//		var cache [][][]byte
 	//		cache = append(cache, [][]byte{[]byte(tx[0]), []byte(tx[1])})
+	//
 	//		if x%999 == 0 {
 	//			c.CurrentTrie.Commit(nil)
 	//			c.CacheTrie.Commit(nil)
 	//		}
-	//		if (x+1)%50000 == 0 {
-	//			index := (x + 1) / 50000
 	//
+	//		if (x+1)%50000 == 0 {
+	//
+	//
+	//
+	//			index := (x + 1) / 10000
 	//			consensusTrieSize, _ = c.db.GetProperty("leveldb.size")
 	//			f2.WriteString(consensusTrieSize)
 	//
@@ -141,6 +227,7 @@ func main() {
 	//			for _, t := range cache {
 	//				c.CacheTrie.Update(t[0], t[1])
 	//			}
+	//			cache = [][][]byte{}
 	//		}
 	//	}
 	//}
@@ -160,4 +247,5 @@ func main() {
 	//	fmt.Printf("key:%x,value:%x\n", iter.Key(), iter.Value())
 	//}
 	//iter.Release()
+
 }
