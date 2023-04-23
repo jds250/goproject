@@ -23,6 +23,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+var Count1, Count2 int = 0, 0
+
 var (
 	// emptyRoot is the known root hash of an empty trie.
 	emptyRoot = HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -198,7 +200,7 @@ func (t *Trie) tryProve(origNode node, key []byte, pos int) (proof [][]byte, new
 			return nil, n, true, err
 		}
 		var pbt []byte
-		pbt, err = t.db.Get(n, nil)
+		pbt, err = t.db.Get(BytesToHash(n).Bytes(), nil)
 		if err != nil {
 			return nil, n, true, err
 		}
@@ -248,6 +250,7 @@ func (t *Trie) TryUpdate(key, value []byte) error {
 }
 
 func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error) {
+	Count2 = Count2 + 1
 	//若key为空，则该节点标记为valuenode并存储值
 	if len(key) == 0 {
 		if v, ok := n.(ValueNode); ok {
@@ -345,6 +348,7 @@ func (t *Trie) TryDelete(key []byte) error {
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
 func (t *Trie) delete(n node, prefix, key []byte) (bool, node, error) {
+	Count1 = Count1 + 1
 	switch n := n.(type) {
 	case *ShortNode:
 		matchlen := prefixLen(key, n.Key)
